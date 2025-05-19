@@ -1,0 +1,1116 @@
+---
+title: "DEA Estand"
+author: "Ilian Garza"
+date: "2025-03-31"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r, cargar la base}
+# Cargar las librerías necesarias
+library(readxl)
+library(e1071)
+
+# Cargar el archivo de Excel
+#df <- read_excel("C:\\Users\\garza\\Downloads\\Libro1.xlsx", sheet = "tidy dumm")
+df <- read_excel("Libro1.xlsx", sheet = "tidy dumm")
+head(df)
+```
+```{r, estandarización min max}
+# Cargar la librería necesaria
+library(caret)
+library(dplyr)
+#install.packages("future", type = "binary")
+
+
+# Separar variables numéricas y categóricas
+columnas_numericas <- sapply(df, is.numeric)
+df_numerico <- df[, columnas_numericas]  # Solo numéricas
+df_categorico <- df[, !columnas_numericas]  # Solo categóricas
+
+# Aplicar Min-Max Scaling solo a las numéricas
+min_max_scaler <- preProcess(df_numerico, method = "range")
+df_min_max_numerico <- predict(min_max_scaler, df_numerico)
+
+# Unir nuevamente las variables categóricas con las numéricas escaladas
+df_min_max <- bind_cols(df_categorico, df_min_max_numerico)
+
+# Mostrar resultados
+cat("\n--- Min-Max Scaling (con variables categóricas conservadas) ---\n")
+print(head(df_min_max))
+
+```
+```{r, est. desc}
+library(summarytools)
+est <-descr(df_min_max[c("G", "C", "I", "M", "X", "PIB")], style = "simple", justify = "center", headings = TRUE)
+print(est)
+```
+```{r, estadisticas desc. por grupo de ing}
+# Cargar librerías necesarias
+library(dplyr)
+library(e1071)  # Para Skewness y Kurtosis
+library(tidyr)  # Para girar la tabla
+
+# Aplicar el resumen a todas las variables económicas 
+resultados <- df_min_max %>%
+  group_by(In_G) %>%
+  summarise(across(c(G, C, I, M, X, PIB), list(
+    count = ~n(),
+    N_Valid = ~sum(!is.na(.)),
+    mean = ~mean(., na.rm = TRUE),
+    sd = ~sd(., na.rm = TRUE),
+    CV = ~sd(., na.rm = TRUE) / mean(., na.rm = TRUE),
+    min = ~min(., na.rm = TRUE),
+    q1 = ~quantile(., 0.25, na.rm = TRUE),
+    median = ~median(., na.rm = TRUE),
+    q3 = ~quantile(., 0.75, na.rm = TRUE),
+    max = ~max(., na.rm = TRUE),
+    iqr = ~IQR(., na.rm = TRUE),
+    Skewness = ~skewness(., na.rm = TRUE),
+    SE_Skewness = ~skewness(., na.rm = TRUE) / sqrt(sum(!is.na(.))),
+    Kurtosis = ~kurtosis(., na.rm = TRUE)
+  ), .names = "{.col}_{.fn}"))  # Personaliza los nombres de columna
+
+
+# Transponer la tabla
+est_Rel_ing <- resultados %>%
+  pivot_longer(cols = -In_G, names_to = "Metric_Variable", values_to = "Value") %>%
+  separate(Metric_Variable, into = c("Variable", "Metric"), sep = "_") %>%
+  pivot_wider(names_from = In_G, values_from = Value)
+
+# Mostrar la tabla transpuesta
+print(est_Rel_ing)
+```
+```{r, serie de tiempo}
+
+str(df_min_max$Año)
+
+```
+
+
+```{r, datos mun}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# 1. Data preparation - summing values by year and variable
+df_mun <- df %>%
+  mutate(Año = as.numeric(as.character(Año))) %>%
+  group_by(Año) %>%
+  summarise(across(c(G, C, I, M, X, PIB), sum, na.rm = TRUE)) %>%
+  ungroup()
+
+# 2. Min-max standardization
+df_suma_anual <- df_mun %>%
+  mutate(across(-Año, ~ (.x - min(.x, na.rm = TRUE)) / 
+                (max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE))))
+
+# 3. Transform to long format
+variables_economicas <- c("G", "C", "I", "M", "X", "PIB")
+df_lineas <- df_suma_anual %>%
+  pivot_longer(cols = -Año, 
+               names_to = "Variable", 
+               values_to = "Valor") %>%
+  mutate(Variable = factor(Variable, levels = variables_economicas))
+
+pdf("variables_time.pdf", width = 10, height = 6)
+# 4. Visualization
+ggplot(df_lineas, aes(x = Año, y = Valor, color = Variable)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(title = "Evolución de Variables Económicas Estandarizadas",
+       x = "Año",
+       y = "Valor Estandarizado (Min-Max)",
+       color = "Variable") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(hjust = 1, size = 7)  # Ajuste aquí
+  )+
+  scale_x_continuous(breaks = unique(df_lineas$Año)) +
+                       scale_color_manual(
+    values = c(
+      "G" = "#4B0055",
+      "C" = "#006992",
+      "I" = "#21BFAE",
+      "M" = "#5CCE64",
+      "X" = "#C0DE35",
+      "PIB" = "#FDE333"
+    ),
+    labels = c(
+    "G" = "Gasto público",
+    "C" = "Consumo",
+    "I" = "Inversión",
+    "M" = "Importaciones",
+    "X" = "Exportaciones",
+    "PIB" = "Producto Interno Bruto"
+  ))
+dev.off()
+```
+```{r,}
+```
+```{r, series de tiempo mun por variable}
+
+# 3. Función para gráficos individuales con datos sumados
+crear_grafico_suma <- function(var) {
+  df_lineas %>%
+    filter(Variable == var) %>%
+    ggplot(aes(x = Año, y = Valor)) +
+    geom_col(fill = "#009F94", alpha = 0.8) +  # Gráfico de barras para mostrar suma
+    geom_line(color = "#3D3576", size = 1) +   # Línea para mostrar tendencia
+    geom_point(color = "#3D3576", size = 3) +
+    geom_text(aes(label = round(Valor, 1)), 
+              vjust = -0.5, size = 3.5, color = "black") +
+    labs(
+      title = paste("Suma anual de", var),
+      subtitle = "Valores agregados por año",
+      x = "Año",
+      y = "Valor total"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+    scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1)))
+}
+
+# 4. Crear y mostrar gráficos de suma
+graficos_suma <- lapply(variables_economicas, crear_grafico_suma)
+
+# Mostrar gráficos uno por uno
+graficos_suma[[1]]  # Suma anual de G
+graficos_suma[[2]]  # Suma anual de C
+graficos_suma[[3]]  # Suma anual de I
+graficos_suma[[4]]  # Suma anual de M
+graficos_suma[[5]]  # Suma anual de X
+graficos_suma[[6]]  # Suma anual de PIB
+
+# 5. Opción para guardar todos los gráficos de suma
+if (!dir.exists("graficos_suma_anual")) dir.create("graficos_suma_anual")
+
+lapply(seq_along(variables_economicas), function(i) {
+  ggsave(
+    filename = paste0("graficos_suma_anual/suma_", variables_economicas[i], ".png"),
+    plot = graficos_suma[[i]],
+    width = 9,
+    height = 6,
+    dpi = 300
+  )
+})
+
+```
+
+```{r, prueba de normalidad kolmogorov}
+# Kolmogorov Smirnov
+library(stats)
+
+columnas <- c("G", "C", "I", "M", "X", "PIB")
+
+for (col in columnas) {
+  ks_result <- ks.test(df[[col]], "pnorm", mean = mean(df[[col]]), sd = sd(df[[col]]))
+  cat("Prueba de Kolmogorov-Smirnov para", col, ":\n")
+  print(ks_result)
+  cat("\n") 
+}
+```
+```{r, normalidad sub Rel con Ing}
+
+# Cargar la librería necesaria
+library(stats)
+
+# Definir las columnas numéricas a evaluar
+columnas <- c("G", "C", "I", "M", "X", "PIB")
+
+# Obtener los niveles de la variable categórica In_G
+niveles <- unique(df$In_G)
+
+# Iterar sobre cada nivel de In_G
+for (nivel in niveles) {
+  cat("\n--- Análisis para In_G =", nivel, "---\n")
+  
+  # Filtrar el dataframe según el nivel actual
+  df_subgrupo <- df[df$In_G == nivel, ]
+  
+  # Aplicar la prueba de Kolmogorov-Smirnov a cada columna numérica
+  for (col in columnas) {
+    if (all(is.na(df_subgrupo[[col]]))) {
+      cat("No hay suficientes datos para", col, "en el grupo", nivel, "\n\n")
+      next
+    }
+    
+    ks_result <- ks.test(df_subgrupo[[col]], "pnorm", 
+                         mean = mean(df_subgrupo[[col]], na.rm = TRUE), 
+                         sd = sd(df_subgrupo[[col]], na.rm = TRUE))
+    
+    cat("Prueba de Kolmogorov-Smirnov para", col, "en el grupo", nivel, ":\n")
+    print(ks_result)
+    cat("\n")
+  }
+}
+
+
+```
+```{r, HISTOGRAMAS ESTE EN EL DOCUMENTO}
+# Usar la base df en lugar de generar datos aleatorios
+variable_names <- c("G", "C", "I", "M", "X", "PIB")
+
+# Configurar el layout para mostrar los histogramas
+par(mfrow = c(2, 3))
+
+# Crear histogramas con datos de df
+for (var in variable_names) {
+  hist(df_min_max[[var]], 
+       main = paste("Histograma de", var), 
+       xlab = "Valores", 
+       ylab = "Frecuencia", 
+       col = "#009F94", 
+       border = "black")
+}
+
+# Restaurar configuración original de gráficos
+par(mfrow = c(1,1))
+
+
+```
+```{r}
+df_min_max_clean
+```
+
+
+```{r, KDE C Ing}
+library(ggplot2)
+library(dplyr)
+
+# Filtrar valores no numéricos o problemáticos
+df_min_max_clean <- df_min_max %>%
+  filter(!is.na(C), is.finite(C))  # Elimina NA e infinitos
+
+# Calcular las medias por cada grupo
+media_por_grupo <- df_min_max_clean %>%
+  group_by(In_G) %>%
+  summarise(media_C = mean(C, na.rm = TRUE))
+
+# Gráfico KDE con la media de cada grupo
+ggplot(df_min_max_clean, aes(x = C, fill = In_G)) +
+  geom_density(alpha = 0.5) +  # KDE con transparencia
+  geom_vline(data = media_por_grupo, aes(xintercept = media_C, color = In_G),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ In_G) +  # Facetado por grupo
+  labs(title = "Distribución KDE de C con medias por grupo",
+       x = "Valores de C",
+       y = "Densidad") +
+  coord_cartesian(xlim = c(0, .25)) +  # Rango del eje x
+  theme_minimal() +
+  theme(legend.position = "bottom")  # Mueve la leyenda abajo
+
+```
+```{r, prueba de colores}
+ggplot(df_min_max_clean, aes(x = X, fill = In_G)) +
+  geom_density(alpha = 0.6) +
+  geom_vline(data = media_por_grupo, aes(xintercept = media_C, color = In_G),
+             linetype = "dashed", size = 1) +
+  facet_wrap(~ In_G) +
+  labs(
+    title = "Distribución KDE de C con medias por grupo",
+    x = "Valores de C",
+    y = "Densidad"
+  ) +
+  coord_cartesian(xlim = c(0, 0.25)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_fill_manual(
+    values = c(
+      "Alto" = "#4B0055",
+      "bajo" = "#C0DE35",
+      "medianoalto" = "#006992",
+      "medianobajo" = "#5CCE64"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "Alto" = "#4B0055",
+      "bajo" = "#C0DE35",
+      "medianoalto" = "#006992",
+      "medianobajo" = "#5CCE64"
+    )
+  )
+```
+
+```{r, KDE G Ing}
+# Filtrar valores no numéricos o problemáticos
+df_min_max_clean <- df_min_max %>%
+  filter(!is.na(G), is.finite(G))  # Elimina NA e infinitos
+
+# Calcular las medias por cada grupo
+media_por_grupo <- df_min_max_clean %>%
+  group_by(In_G) %>%
+  summarise(media_G = mean(G, na.rm = TRUE))
+
+# Gráfico KDE con la media de cada grupo
+ggplot(df_min_max_clean, aes(x = C, fill = In_G)) +
+  geom_density(alpha = 0.5) +  # KDE con transparencia
+  geom_vline(data = media_por_grupo, aes(xintercept = media_G, color = In_G),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ In_G) +  # Facetado por grupo
+  labs(title = "Distribución KDE de C con medias por grupo",
+       x = "Valores de G",
+       y = "Densidad") +
+  coord_cartesian(xlim = c(0, .2)) +  # Rango del eje x
+  theme_minimal() +
+  theme(legend.position = "bottom")  # Mueve la leyenda abajo
+
+```
+
+
+```{r, KDE I Ing}
+ 
+# Filtrar valores no numéricos o problemáticos
+df_min_max_clean <- df_min_max %>%
+  filter(!is.na(I), is.finite(I))  # Elimina NA e infinitos
+
+# Calcular las medias por cada grupo
+media_por_grupo <- df_min_max_clean %>%
+  group_by(In_G) %>%
+  summarise(media_I = mean(I, na.rm = TRUE))
+
+# Gráfico KDE con la media de cada grupo
+ggplot(df_min_max_clean, aes(x = I, fill = In_G)) +
+  geom_density(alpha = 0.5) +  # KDE con transparencia
+  geom_vline(data = media_por_grupo, aes(xintercept = media_I, color = In_G),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ In_G) +  # Facetado por grupo
+  labs(title = "Distribución KDE de C con medias por grupo",
+       x = "Valores de I",
+       y = "Densidad") +
+  coord_cartesian(xlim = c(0, .2)) +  # Rango del eje x
+  theme_minimal() +
+  theme(legend.position = "bottom")  # Mueve la leyenda abajo
+
+
+```
+```{r,KDE PIB Ing}
+
+# Filtrar valores no numéricos o problemáticos
+df_min_max_clean <- df_min_max %>%
+  filter(!is.na(PIB), is.finite(PIB))  # Elimina NA e infinitos
+
+# Calcular las medias por cada grupo
+media_por_grupo <- df_min_max_clean %>%
+  group_by(In_G) %>%
+  summarise(media_PIB = mean(PIB, na.rm = TRUE))
+
+# Gráfico KDE con la media de cada grupo
+ggplot(df_min_max_clean, aes(x = PIB, fill = In_G)) +
+  geom_density(alpha = 0.5) +  # KDE con transparencia
+  geom_vline(data = media_por_grupo, aes(xintercept = media_PIB, color = In_G),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ In_G) +  # Facetado por grupo
+  labs(title = "Distribución KDE de C con medias por grupo",
+       x = "Valores de PIB",
+       y = "Densidad") +
+  coord_cartesian(xlim = c(0, .2)) +  # Rango del eje x
+  theme_minimal() +
+  theme(legend.position = "bottom")  # Mueve la leyenda abajo
+
+```
+```{r,KDE X Ing}
+
+# Filtrar valores no numéricos o problemáticos
+df_min_max_clean <- df_min_max %>%
+  filter(!is.na(X), is.finite(X))  # Elimina NA e infinitos
+
+# Calcular las medias por cada grupo
+media_por_grupo <- df_min_max_clean %>%
+  group_by(In_G) %>%
+  summarise(media_X = mean(X, na.rm = TRUE))
+
+# Gráfico KDE con la media de cada grupo
+ggplot(df_min_max_clean, aes(x = X, fill = In_G)) +
+  geom_density(alpha = 0.5) +  # KDE con transparencia
+  geom_vline(data = media_por_grupo, aes(xintercept = media_X, color = In_G),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ In_G) +  # Facetado por grupo
+  labs(title = "Distribución KDE de C con medias por grupo",
+       x = "Valores de X",
+       y = "Densidad") +
+  coord_cartesian(xlim = c(0, 1)) +  # Rango del eje x
+  theme_minimal() +
+  theme(legend.position = "bottom")  # Mueve la leyenda abajo
+
+```
+```{r,KDE M Ing}
+# Filtrar valores no numéricos o problemáticos
+df_min_max_clean <- df_min_max %>%
+  filter(!is.na(M), is.finite(M))  # Elimina NA e infinitos
+
+# Calcular las medias por cada grupo
+media_por_grupo <- df_min_max_clean %>%
+  group_by(In_G) %>%
+  summarise(media_M = mean(M, na.rm = TRUE))
+
+# Gráfico KDE con la media de cada grupo
+ggplot(df_min_max_clean, aes(x = M, fill = In_G)) +
+  geom_density(alpha = 0.5) +  # KDE con transparencia
+  geom_vline(data = media_por_grupo, aes(xintercept = media_M, color = In_G),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ In_G) +  # Facetado por grupo
+  labs(title = "Distribución KDE de C con medias por grupo",
+       x = "Valores de M",
+       y = "Densidad") +
+  coord_cartesian(xlim = c(0, 1)) +  # Rango del eje x
+  theme_minimal() +
+  theme(legend.position = "bottom")  # Mueve la leyenda abajo
+
+```
+```{r, KDE alto}
+df_min_max %>%
+  filter(In_G == "Alto") %>%
+  summarise(across(c(G, C, I, M, X, PIB), ~ sum(!is.na(.))))
+
+```
+```{r, KDE alto ESTE EN EL DOCUMENTO}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+#rey
+variable_labels <- c(
+  "G" = "Gasto público o de gobierno",
+  "C" = "Consumo agregado de\n bienes y servicios",
+  "I" = "Inversión extrangera y nacional",
+  "M" = "Importaciones",
+  "X" = "Exportaciones",
+  "PIB" = "Producto Interno Bruto"
+)
+
+
+
+# Filtrar solo la categoría "alto" en In_G y eliminar valores no válidos
+df_filtered <- df_min_max %>%
+  filter(In_G == "Alto") %>%  # Filtra solo la categoría "alto"
+  select(In_G, G, C, I, M, X, PIB) %>%
+  pivot_longer(cols = -In_G, names_to = "Variable", values_to = "Valor") %>%
+  filter(!is.na(Valor), is.finite(Valor))  # Elimina NA e infinitos
+
+# Calcular la media de cada variable
+medias <- df_filtered %>%
+  group_by(Variable) %>%
+  summarise(media = mean(Valor, na.rm = TRUE))
+
+pdf("grafico_kde_alto.pdf", width = 10, height = 6)
+# Gráfico KDE con la media
+ggplot(df_filtered, aes(x = Valor, fill = Variable)) +
+  geom_density(alpha = 0.4) +  # KDE con transparencia
+  geom_vline(data = medias, aes(xintercept = media, color = Variable),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ Variable, scales = "free", labeller = labeller(Variable = variable_labels)) +  # Un gráfico por variable, escalas libres
+  labs(title = "Distribución por variable de los países de grupo de ingreso alto",
+       x = "Valor",
+       y = "Densidad") +
+  theme_minimal() +
+  theme(legend.position = "none") + # Oculta la leyenda para evitar redundancia
+  scale_color_manual(
+    values = c(
+      "G" = "#4B0055",
+      "C" = "#006992",
+      "I" = "#21BFAE",
+      "M" = "#5CCE64",
+      "X" = "#C0DE35",
+      "PIB" = "#FDE333"
+    )) + scale_fill_manual(
+    values = c(
+      "G" = "#4B0055",
+      "C" = "#006992",
+      "I" = "#21BFAE",
+      "M" = "#5CCE64",
+      "X" = "#C0DE35",
+      "PIB" = "#FDE333"
+    ))
+dev.off()
+```
+
+```{r, KDE medianoalto ESTE EN EL DOCUMENTO}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+variable_labels <- c(
+  "G" = "Gasto público o de gobierno",
+  "C" = "Consumo agregado de\n bienes y servicios",
+  "I" = "Inversión extrangera y nacional",
+  "M" = "Importaciones",
+  "X" = "Exportaciones",
+  "PIB" = "Producto Interno Bruto"
+)
+
+# Filtrar solo la categoría "medianoalto" en In_G y eliminar valores no válidos
+df_filtered <- df_min_max %>%
+  filter(In_G == "medianoalto") %>%  
+  select(In_G, G, C, I, M, X, PIB) %>%
+  pivot_longer(cols = -In_G, names_to = "Variable", values_to = "Valor") %>%
+  filter(!is.na(Valor), is.finite(Valor))  # Elimina NA e infinitos
+
+# Calcular la media de cada variable
+medias <- df_filtered %>%
+  group_by(Variable) %>%
+  summarise(media = mean(Valor, na.rm = TRUE))
+
+pdf("grafico_kde_medioalto.pdf", width = 10, height = 6)
+# Gráfico KDE con la media
+ggplot(df_filtered, aes(x = Valor, fill = Variable)) +
+  geom_density(alpha = 0.4) +  # KDE con transparencia
+  geom_vline(data = medias, aes(xintercept = media, color = Variable),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ Variable, scales = "free", labeller = labeller(Variable = variable_labels)) +  # Un gráfico por variable, escalas libres
+  labs(title = "Distribución por variable para los países de ingreso mediano alto",
+       x = "Valor",
+       y = "Densidad") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Oculta la leyenda para evitar redundancia
+dev.off()
+
+```
+```{r, KDE medianobajo ESTE EN EL DOCUMENTO}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+variable_labels <- c(
+  "G" = "Gasto público o de gobierno",
+  "C" = "Consumo agregado de\n bienes y servicios",
+  "I" = "Inversión extrangera y nacional",
+  "M" = "Importaciones",
+  "X" = "Exportaciones",
+  "PIB" = "Producto Interno Bruto"
+)
+
+# Filtrar solo la categoría "medianobajo" en In_G y eliminar valores no válidos
+df_filtered <- df_min_max %>%
+  filter(In_G == "medianobajo") %>%  
+  select(In_G, G, C, I, M, X, PIB) %>%
+  pivot_longer(cols = -In_G, names_to = "Variable", values_to = "Valor") %>%
+  filter(!is.na(Valor), is.finite(Valor))  # Elimina NA e infinitos
+
+# Calcular la media de cada variable
+medias <- df_filtered %>%
+  group_by(Variable) %>%
+  summarise(media = mean(Valor, na.rm = TRUE))
+
+pdf("grafico_kde_mediobajo.pdf", width = 10, height = 6)
+# Gráfico KDE con la media
+ggplot(df_filtered, aes(x = Valor, fill = Variable)) +
+  geom_density(alpha = 0.4) +  # KDE con transparencia
+  geom_vline(data = medias, aes(xintercept = media, color = Variable),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ Variable, scales = "free", labeller = labeller(Variable = variable_labels)) +  # Un gráfico por variable, escalas libres
+  labs(title = "Distribución por variable para los países de ingreso mediano bajo",
+       x = "Valor",
+       y = "Densidad") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Oculta la leyenda para evitar redundancia
+dev.off()
+
+```
+```{r, KDE bajo ESTE EN EL DOCUMENTO}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+variable_labels <- c(
+  "G" = "Gasto público o de gobierno",
+  "C" = "Consumo agregado de\n bienes y servicios",
+  "I" = "Inversión extrangera y nacional",
+  "M" = "Importaciones",
+  "X" = "Exportaciones",
+  "PIB" = "Producto Interno Bruto"
+)
+
+df_filtered <- df_min_max %>%
+  filter(In_G == "bajo") %>%  
+  select(In_G, G, C, I, M, X, PIB) %>%
+  pivot_longer(cols = -In_G, names_to = "Variable", values_to = "Valor") %>%
+  filter(!is.na(Valor), is.finite(Valor))  # Elimina NA e infinitos
+
+# Calcular la media de cada variable
+medias <- df_filtered %>%
+  group_by(Variable) %>%
+  summarise(media = mean(Valor, na.rm = TRUE))
+
+pdf("grafico_kde_bajo.pdf", width = 10, height = 6)
+# Gráfico KDE con la media
+ggplot(df_filtered, aes(x = Valor, fill = Variable)) +
+  geom_density(alpha = 0.4) +  # KDE con transparencia
+  geom_vline(data = medias, aes(xintercept = media, color = Variable),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ Variable, scales = "free", labeller = labeller(Variable = variable_labels)) +  # Un gráfico por variable, escalas libres
+  labs(title = "Distribución  por variable para los países de ingreso bajo",
+       x = "Valor",
+       y = "Densidad") +
+  theme_minimal() +
+  theme(legend.position = "none")  # Oculta la leyenda para evitar redundancia
+dev.off()
+
+```
+```{r, correlación }
+# Cargar la librería necesaria
+library(stats)
+
+# Definir las columnas numéricas a analizar
+columnas <- c("G", "C", "I", "M", "X", "PIB")
+
+# Filtrar solo las columnas necesarias
+df_numerico <- df_numerico[, columnas, drop = FALSE]
+
+# Calcular la matriz de correlación de Spearman
+cor_matrix <- cor(df_numerico, method = "spearman", use = "complete.obs")
+
+# Imprimir la matriz de correlación
+cat("\n--- Matriz de Correlación de Spearman ---\n")
+print(cor_matrix)
+
+```
+```{r, Spearman según el grupo de ingreso}
+# Cargar librería necesaria
+library(stats)
+
+# Definir las columnas numéricas
+columnas <- c("G", "C", "I", "M", "X", "PIB")
+
+# Obtener los niveles únicos de la variable In_G
+niveles <- unique(df_categorico$In_G)
+
+# Iterar sobre cada nivel de In_G
+for (nivel in niveles) {
+  cat("\n--- Correlaciones de Spearman para In_G =", nivel, "---\n")
+  
+  # Filtrar el dataframe para el nivel actual
+  df_subgrupo <- df_min_max[df_min_max$In_G == nivel, columnas, drop = FALSE]
+  
+  # Verificar que haya suficientes datos para calcular correlación
+  if (nrow(df_subgrupo) < 3) {  # Se necesitan al menos 3 puntos para calcular correlación
+    cat("No hay suficientes datos en el grupo", nivel, "para calcular la correlación.\n\n")
+    next
+  }
+  
+  # Calcular la matriz de correlación de Spearman
+  cor_matrix <- cor(df_subgrupo, method = "spearman", use = "complete.obs")
+  
+  # Imprimir la matriz de correlación
+  print(cor_matrix)
+  cat("\n")
+}
+
+
+```
+```{r}
+# Cargar la librería necesaria
+library(stats)
+
+# Definir las columnas numéricas a analizar
+columnas <- c("G", "C", "I", "M", "X", "PIB")
+
+# Filtrar solo las columnas necesarias
+df_numerico <- df_numerico[, columnas, drop = FALSE]
+
+# Calcular la matriz de correlación de Spearman
+cor_matrix <- cor(df_numerico, method = "spearman", use = "complete.obs")
+
+# Imprimir la matriz de correlación
+cat("\n--- Matriz de Correlación de Spearman ---\n")
+print(cor_matrix)
+```
+```{r, ESTE EN EL DOCUMENTO}
+library(ggplot2)
+library(reshape2)
+library(viridis)
+
+# Convertir la matriz en formato largo para ggplot
+cor_melted <- melt(cor_matrix)
+
+# Nombres personalizados
+nombres_amigables <- c(
+  "G" = "Gasto público",
+  "C" = "Consumo agregado de\n bienes y servicios",
+  "I" = "Inversión extrangera\n y nacional",
+  "M" = "Importaciones",
+  "X" = "Exportaciones",
+  "PIB" = "Producto Interno\n Bruto"
+)
+
+# Reemplazar nombres en los ejes
+cor_melted$Var1 <- nombres_amigables[as.character(cor_melted$Var1)]
+cor_melted$Var2 <- nombres_amigables[as.character(cor_melted$Var2)]
+
+pdf("heatmap_spearman.pdf", width = 10, height = 6)
+# Graficar el mapa de calor
+ggplot(cor_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  #scale_fill_viridis(option = "C", limits = c(-1, 1), name = "Spearman") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.6, limits = c(-1, 1), name = "Spearman") +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 4) +
+  theme_minimal(base_size = 14) +
+  labs(title = "Análisis de correlación de Spearman\nentre las variables",
+       x = NULL, y = NULL) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y = element_text(size = 12)
+  )
+dev.off()
+
+```
+```{r, ESTE EN EL DOCUMENTO}
+library(stats)
+
+# Definir las columnas numéricas
+columnas <- c("G", "C", "I", "M", "X", "PIB")
+
+# Obtener niveles únicos de la variable In_G
+niveles <- unique(df_categorico$In_G)
+
+# Crear lista para guardar las matrices
+matrices_correlacion <- list()
+
+# Calcular una matriz de correlación por grupo de ingreso
+for (nivel in niveles) {
+  df_subgrupo <- df_min_max[df_min_max$In_G == nivel, columnas, drop = FALSE]
+  
+  if (nrow(df_subgrupo) >= 3) {
+    cor_mat <- cor(df_subgrupo, method = "spearman", use = "complete.obs")
+    matrices_correlacion[[as.character(nivel)]] <- cor_mat
+  }
+}
+
+```
+```{r}
+library(ggplot2)
+library(reshape2)
+library(viridis)
+
+for (nombre_nivel in names(matrices_correlacion)) {
+  cor_matrix <- matrices_correlacion[[nombre_nivel]]
+  cor_melted <- melt(cor_matrix)
+  
+  p <- ggplot(cor_melted, aes(x = Var1, y = Var2, fill = value)) +
+    geom_tile(color = "white") +
+    #scale_fill_viridis(option = "C", limits = c(-1, 1), name = "Spearman") +
+    scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.6, limits = c(-1, 1), name = "Spearman") +
+    geom_text(aes(label = round(value, 2)), color = "black", size = 4) +
+    theme_minimal(base_size = 14) +
+    labs(title = paste("Mapa de calor de correlaciones de Spearman\nIn_G =", nombre_nivel),
+         x = NULL, y = NULL) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+      axis.text.y = element_text(size = 12)
+    )
+  
+  print(p)
+}
+```
+```{r, ID3}
+# librería C50
+library(C50)
+
+# Fijar semilla para reproducibilidad
+set.seed(123)
+
+
+# Dividir datos en entrenamiento (70%) y prueba (30%)
+indices <- sample(1:nrow(df_min_max_numerico), 0.7 * nrow(df_min_max_numerico))
+# Convertir la variable objetivo en factor
+train_data$C <- as.factor(train_data$C)
+test_data$C <- as.factor(test_data$C)
+
+#"G", "C", "I", "M", "X", "PIB"
+# Crear el modelo C5.0 (C4.5 mejorado, derivado de ID3)
+modelo_C50 <- C5.0(C ~ G + C + I + M + X + PIB , data = train_data)
+
+# Visualizar el modelo
+summary(modelo_C50)
+
+# Realizar predicciones
+predicciones <- predict(modelo_C50, test_data)
+
+# Evaluar precisión con matriz de confusión
+conf_matrix <- table(test_data$C, predicciones)  # Usar test_data$C
+
+# Calcular precisión
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+print(paste("Precisión del modelo:", round(accuracy, 4) * 100, "%"))
+
+
+
+```
+```{r}
+
+# cargar librerías necesarias
+#library(partykit)
+
+# Convertir el modelo C5.0 a un formato gráfico
+#modelo_party <- as.party(modelo_C50)
+
+# Graficar solo la estructura del árbol (nodos padres e hijos)
+#plot(modelo_party, tp_args = list(id = FALSE))  # Oculta los valores de prueba
+
+```
+
+```{r,}
+library(ggplot2)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(dplyr)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+#head(world)
+
+# Quitar antártida
+world <- world %>%
+  filter(name != "Antarctica")
+
+
+```
+```{r}
+
+# Graficar el mapa con nuevo formato
+ggplot(world) +
+  geom_sf(fill = "white", color = "grey60") +
+  labs(title = "Mapa de América Latina") +
+  theme_gray() +  # Fondo gris
+  theme(
+    panel.background = element_rect(fill = "grey95"),
+    panel.grid = element_line(color = "white"),
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5)
+  )
+```
+```{r, unir bases}
+
+world_joined <- world %>%
+  left_join(df_min_max, by = "name")
+
+```
+```{r, ESTE EN EL DOCUMENTO}
+
+ggplot(data = world_joined) +
+  geom_sf(aes(fill = C), color = "gray90") +
+  #scale_fill_viridis_c(option = "viridis", na.value = "white") +
+  #scale_fill_gradient(low = "#B9DDF1", high = "#2A5783", na.value = "white") +#azul pastel
+  #scale_fill_gradient(low = "#FEB1A3", high = "#AE123A", na.value = "white") +#rojo pastel
+  #scale_fill_gradient(low = "#FBBC70", high = "#9E3D22", na.value = "white") +#naranja pastel
+  #scale_fill_gradient(low = "#AACAF5", high = "#001889", na.value = "white") +#azul
+  #scale_fill_gradient(low = "#001889", high = "#AACAF5", na.value = "white") +#azul-inv
+  #scale_fill_gradient(low = "lightyellow", high = "darkblue", na.value = "white") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.4, na.value = "white")+
+
+  theme_minimal() +
+  labs(
+    title = "Consumo agregado de bienes y servicios pér capita",
+    fill = "Valor C"
+  )
+```
+```{r}
+# Paquetes necesarios
+library(rnaturalearth)
+library(dplyr)
+
+paises_en <- c("Albania", "Germany", "Algeria", "Argentina", "Armenia", "Austria", "Bahamas", "Bangladesh",
+               "Belarus", "Belgium", "Belize", "Benin", "Bosnia and Herzegovina", "Botswana", "Brazil",
+               "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cambodia", "Cameroon", "Canada", "Chile",
+               "Cyprus", "Colombia", "Comoros", "Republic of the Congo", "Democratic Republic of the Congo",
+               "South Korea", "Costa Rica", "Croatia", "Cuba", "Denmark", "Ecuador", "Egypt", "El Salvador",
+               "Slovenia", "Spain", "United States of America", "Estonia", "Eswatini", "Russia", "Philippines",
+               "Finland", "France", "Gabon", "Greece", "Guatemala", "Guinea-Bissau", "Haiti", "Honduras",
+               "Hungary", "India", "Indonesia", "Iran", "Ireland", "Iceland", "Israel", "Italy", "Japan",
+               "Kazakhstan", "Kenya", "Lesotho", "Latvia", "Lithuania", "Luxembourg", "North Macedonia",
+               "Madagascar", "Malaysia", "Mali", "Malta", "Morocco", "Mauritania", "Mexico", "Mozambique",
+               "Namibia", "Nepal", "Nicaragua", "Niger", "Norway", "New Zealand", "Netherlands", "Pakistan",
+               "Paraguay", "Peru", "Poland", "Portugal", "United Kingdom", "Czechia", "Moldova", "Dominican Republic",
+               "Slovakia", "Romania", "Rwanda", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "South Africa",
+               "Sweden", "Switzerland", "Tanzania", "Tajikistan", "Timor-Leste", "Togo", "Tunisia", "Ukraine",
+               "Uganda", "Vietnam")
+
+# Cargar geometría mundial
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Verificar si están en el dataset
+presentes <- paises_en %in% world$name
+resultado <- data.frame(
+  pais_eng = paises_en,
+  en_dataset = presentes
+)
+
+# Mostrar los que no están
+cat("❌ Países NO encontrados en rnaturalearth:\n")
+print(resultado %>% filter(!en_dataset))
+
+# Mostrar resumen
+cat("\n✅ Países encontrados:", sum(presentes), "de", length(paises_en), "\n")
+
+
+```
+```{r}
+  world_joined <- world %>%
+    left_join(df_min_max, by = "name")
+
+
+
+pdf("countries_by_In_group.pdf", width = 10, height = 5)
+  ggplot(world_joined) +
+    geom_sf(aes(fill = In_G), color = "gray90") +
+    scale_fill_manual(
+      values = c(
+        "Alto" = "#4B0055",
+        "medianoalto" = "#006992",
+        "medianobajo" = "#5CCE64",
+        "bajo" = "#C0DE35"
+      ),
+      labels = c(
+        "Alto" = "Ingreso alto",
+        "medianoalto" = "Ingreso mediano alto",
+        "medianobajo" = "Ingreso mediano bajo",
+        "bajo" = "Ingreso bajo"
+      ),
+      na.value = "white"
+    ) +
+    theme_minimal() +
+    labs(
+      title = "Clasificación de países por grupo de ingreso",
+      fill = "Grupo de ingreso"
+    )
+dev.off()
+```
+# Pruebas extra
+
+```{r}
+head(df_min_max)
+```
+
+
+```{r, KDE por país}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+#rey
+variable_labels <- c(
+  "G" = "Gasto público o de gobierno",
+  "C" = "Consumo agregado de\n bienes y servicios",
+  "I" = "Inversión extrangera y nacional",
+  "M" = "Importaciones",
+  "X" = "Exportaciones",
+  "PIB" = "Producto Interno Bruto"
+)
+
+
+
+# Filtrar solo la categoría "alto" en In_G y eliminar valores no válidos
+df_filtered <- df_min_max %>%
+  filter(In_G == "Alto") %>%  # Filtra solo la categoría "alto"
+  select(In_G, G, C, I, M, X, PIB) %>%
+  pivot_longer(cols = -In_G, names_to = "Variable", values_to = "Valor") %>%
+  filter(!is.na(Valor), is.finite(Valor))  # Elimina NA e infinitos
+
+# Calcular la media de cada variable
+medias <- df_filtered %>%
+  group_by(Variable) %>%
+  summarise(media = mean(Valor, na.rm = TRUE))
+
+pdf("grafico_kde_alto.pdf", width = 10, height = 6)
+# Gráfico KDE con la media
+ggplot(df_filtered, aes(x = Valor, fill = Variable)) +
+  geom_density(alpha = 0.4) +  # KDE con transparencia
+  geom_vline(data = medias, aes(xintercept = media, color = Variable),
+             linetype = "dashed", size = 1) +  # Línea de la media
+  facet_wrap(~ Variable, scales = "free", labeller = labeller(Variable = variable_labels)) +  # Un gráfico por variable, escalas libres
+  labs(title = "Distribución por variable de los países de grupo de ingreso alto",
+       x = "Valor",
+       y = "Densidad") +
+  theme_minimal() +
+  theme(legend.position = "none") + # Oculta la leyenda para evitar redundancia
+  scale_color_manual(
+    values = c(
+      "G" = "#4B0055",
+      "C" = "#006992",
+      "I" = "#21BFAE",
+      "M" = "#5CCE64",
+      "X" = "#C0DE35",
+      "PIB" = "#FDE333"
+    )) + scale_fill_manual(
+    values = c(
+      "G" = "#4B0055",
+      "C" = "#006992",
+      "I" = "#21BFAE",
+      "M" = "#5CCE64",
+      "X" = "#C0DE35",
+      "PIB" = "#FDE333"
+    ))
+dev.off()
+```
+
+```{r, series de tiempo por ingreso}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Variables económicas
+variables_economicas <- c("G", "C", "I", "M", "X", "PIB")
+
+# 1. Agrupar y sumar por Año e In_G
+df_grouped <- df %>%
+  mutate(Año = as.numeric(as.character(Año))) %>%
+  group_by(In_G, Año) %>%
+  summarise(across(all_of(variables_economicas), sum, na.rm = TRUE), .groups = "drop")
+
+# 2. Estandarizar min-max por grupo In_G
+df_scaled <- df_grouped %>%
+  group_by(In_G) %>%
+  mutate(across(all_of(variables_economicas), ~ (.x - min(.x, na.rm = TRUE)) / 
+                                              (max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE)))) %>%
+  ungroup()
+
+# 3. Convertir a formato largo
+df_long <- df_scaled %>%
+  pivot_longer(cols = all_of(variables_economicas), 
+               names_to = "Variable", 
+               values_to = "Valor") %>%
+  mutate(Variable = factor(Variable, levels = variables_economicas))
+
+# 4. Graficar por grupo In_G usando facet_wrap
+grafica_por_grupo <- ggplot(df_long, aes(x = Año, y = Valor, color = Variable)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ In_G, scales = "free_y") +  # Paneles por grupo
+  labs(title = "Evolución de variables  macroeconómicas por grupo de ingreso",
+       x = "Año",
+       y = "Valor Estandarizado (Min-Max)",
+       color = "Variable") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7)) +
+  scale_color_manual(
+    values = c(
+      "G" = "#4B0055",
+      "C" = "#006992",
+      "I" = "#21BFAE",
+      "M" = "#5CCE64",
+      "X" = "#C0DE35",
+      "PIB" = "#FDE333"
+    ),
+    labels = c(
+      "G" = "Gasto público",
+      "C" = "Consumo",
+      "I" = "Inversión",
+      "M" = "Importaciones",
+      "X" = "Exportaciones",
+      "PIB" = "Producto Interno Bruto"
+    )
+  )
+
+grafica_por_grupo
+
+```

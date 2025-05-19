@@ -1,0 +1,420 @@
+---
+title: "Análisis Macroeconómico 2000-2023"
+output: 
+  flexdashboard::flex_dashboard:
+    theme:
+      bg: "#101010"
+      fg: "#FDF7F7" 
+      primary: "#006992"
+      base_font:
+        google: Prompt
+      code_font:
+        google: JetBrains Mono
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(readxl)
+library(e1071)
+library(caret)
+library(dplyr)
+library(sf)
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+# Install thematic and un-comment for themed static plots (i.e., ggplot2)
+# thematic::thematic_rmd()
+```
+```{r, include=FALSE}
+
+
+# Cargar datos
+df <- read_excel("Libro1.xlsx", sheet = "tidy dumm")
+
+# Separar y escalar variables numéricas
+columnas_numericas <- sapply(df, is.numeric)
+df_numerico <- df[, columnas_numericas]
+df_categorico <- df[, !columnas_numericas]
+
+min_max_scaler <- preProcess(df_numerico, method = "range")
+df_min_max_numerico <- predict(min_max_scaler, df_numerico)
+df_min_max <- bind_cols(df_categorico, df_min_max_numerico)
+
+# Asegurar que la columna de países se llame "name"
+names(df_min_max)[names(df_min_max) == "tu_columna_de_paises"] <- "name"  # ← cambia esto si necesario
+
+# Convertir año a numérico
+df_min_max$Año <- as.numeric(df_min_max$Año)
+
+# Cargar mapa base y filtrar antártida
+world <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  filter(name != "Antarctica")
+
+```
+
+Column {data-width=650 .tabset}
+-----------------------------------------------------------------------
+
+
+### Grupo de ingreso
+
+```{r}
+renderPlot({
+  df_filtrado <- df_min_max %>%
+    filter(Año == input$año)
+
+  world_joined <- world %>%
+    left_join(df_filtrado, by = "name")
+
+  ggplot(world_joined) +
+    geom_sf(aes(fill = In_G), color = "gray90") +
+    scale_fill_manual(
+      values = c(
+        "Alto" = "#4B0055",
+        "bajo" = "#C0DE35",
+       "medianoalto" = "#006992",
+       "medianobajo" = "#5CCE64"
+      ),
+      na.value = "white"
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("Clasificación por grupo de ingreso, año", input$año),
+      fill = "Grupo de ingreso"
+    ) + 
+    theme(
+      plot.title = element_text(size = 24, face = "bold"),     # Título del gráfico
+      legend.title = element_text(size = 18),                  # Título de la leyenda
+      legend.text = element_text(size = 14),                   # Texto de la leyenda
+      axis.title = element_text(size = 13),                    # Títulos de ejes
+      axis.text = element_text(size = 12)                      # Números del eje
+    )
+})
+```
+
+
+### PIB
+
+```{r}
+renderPlot({
+  df_filtrado <- df_min_max %>%
+    filter(Año == input$año)
+
+  world_joined <- world %>%
+    left_join(df_filtrado, by = "name")
+
+  ggplot(data = world_joined) +
+  geom_sf(aes(fill = PIB), color = "gray90") +
+  #scale_fill_viridis_c(option = "viridis", na.value = "white") +
+  #scale_fill_gradient(low = "#B9DDF1", high = "#2A5783", na.value = "white") +#azul pastel
+  #scale_fill_gradient(low = "#FEB1A3", high = "#AE123A", na.value = "white") +#rojo pastel
+  #scale_fill_gradient(low = "#FBBC70", high = "#9E3D22", na.value = "white") +#naranja pastel
+  #scale_fill_gradient(low = "#AACAF5", high = "#001889", na.value = "white") +#azul
+  #scale_fill_gradient(low = "#001889", high = "#AACAF5", na.value = "white") +#azul-inv
+  #scale_fill_gradient(low = "lightyellow", high = "darkblue", na.value = "white") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.4, na.value = "white")+
+
+  theme_minimal() +
+  labs(
+    title = paste("Mapa para variable de producto interno bruto, año", input$año),
+    fill = "Valor PIB"
+  ) + 
+    theme(
+      plot.title = element_text(size = 24, face = "bold"),     # Título del gráfico
+      legend.title = element_text(size = 18),                  # Título de la leyenda
+      legend.text = element_text(size = 14),                   # Texto de la leyenda
+      axis.title = element_text(size = 13),                    # Títulos de ejes
+      axis.text = element_text(size = 12)                      # Números del eje
+    )
+})
+```
+
+
+### Consumo agregado
+
+```{r}
+renderPlot({
+  df_filtrado <- df_min_max %>%
+    filter(Año == input$año)
+
+  world_joined <- world %>%
+    left_join(df_filtrado, by = "name")
+
+  ggplot(data = world_joined) +
+  geom_sf(aes(fill = C), color = "gray90") +
+  #scale_fill_viridis_c(option = "viridis", na.value = "white") +
+  #scale_fill_gradient(low = "#B9DDF1", high = "#2A5783", na.value = "white") +#azul pastel
+  #scale_fill_gradient(low = "#FEB1A3", high = "#AE123A", na.value = "white") +#rojo pastel
+  #scale_fill_gradient(low = "#FBBC70", high = "#9E3D22", na.value = "white") +#naranja pastel
+  #scale_fill_gradient(low = "#AACAF5", high = "#001889", na.value = "white") +#azul
+  #scale_fill_gradient(low = "#001889", high = "#AACAF5", na.value = "white") +#azul-inv
+  #scale_fill_gradient(low = "lightyellow", high = "darkblue", na.value = "white") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.4, na.value = "white")+
+
+  theme_minimal() +
+  labs(
+    title = paste("Mapa para variable de consumo agregado de bienes y servicios, año", input$año),
+    fill = "Valor C"
+  ) + 
+    theme(
+      plot.title = element_text(size = 24, face = "bold"),     # Título del gráfico
+      legend.title = element_text(size = 18),                  # Título de la leyenda
+      legend.text = element_text(size = 14),                   # Texto de la leyenda
+      axis.title = element_text(size = 13),                    # Títulos de ejes
+      axis.text = element_text(size = 12)                      # Números del eje
+    )
+})
+```
+
+
+### Inversión
+
+```{r}
+renderPlot({
+  df_filtrado <- df_min_max %>%
+    filter(Año == input$año)
+
+  world_joined <- world %>%
+    left_join(df_filtrado, by = "name")
+
+  ggplot(data = world_joined) +
+  geom_sf(aes(fill = I), color = "gray90") +
+  #scale_fill_viridis_c(option = "viridis", na.value = "white") +
+  #scale_fill_gradient(low = "#B9DDF1", high = "#2A5783", na.value = "white") +#azul pastel
+  #scale_fill_gradient(low = "#FEB1A3", high = "#AE123A", na.value = "white") +#rojo pastel
+  #scale_fill_gradient(low = "#FBBC70", high = "#9E3D22", na.value = "white") +#naranja pastel
+  #scale_fill_gradient(low = "#AACAF5", high = "#001889", na.value = "white") +#azul
+  #scale_fill_gradient(low = "#001889", high = "#AACAF5", na.value = "white") +#azul-inv
+  #scale_fill_gradient(low = "lightyellow", high = "darkblue", na.value = "white") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.4, na.value = "white")+
+
+  theme_minimal() +
+  labs(
+    title = paste("Mapa para variable de inversión extrangera y nacional, año", input$año),
+    fill = "Valor I"
+  ) + 
+    theme(
+      plot.title = element_text(size = 24, face = "bold"),     # Título del gráfico
+      legend.title = element_text(size = 18),                  # Título de la leyenda
+      legend.text = element_text(size = 14),                   # Texto de la leyenda
+      axis.title = element_text(size = 13),                    # Títulos de ejes
+      axis.text = element_text(size = 12)                      # Números del eje
+    )
+})
+```
+
+
+### Gasto
+
+```{r}
+renderPlot({
+  df_filtrado <- df_min_max %>%
+    filter(Año == input$año)
+
+  world_joined <- world %>%
+    left_join(df_filtrado, by = "name")
+
+  ggplot(data = world_joined) +
+  geom_sf(aes(fill = G), color = "gray90") +
+  #scale_fill_viridis_c(option = "viridis", na.value = "white") +
+  #scale_fill_gradient(low = "#B9DDF1", high = "#2A5783", na.value = "white") +#azul pastel
+  #scale_fill_gradient(low = "#FEB1A3", high = "#AE123A", na.value = "white") +#rojo pastel
+  #scale_fill_gradient(low = "#FBBC70", high = "#9E3D22", na.value = "white") +#naranja pastel
+  #scale_fill_gradient(low = "#AACAF5", high = "#001889", na.value = "white") +#azul
+  #scale_fill_gradient(low = "#001889", high = "#AACAF5", na.value = "white") +#azul-inv
+  #scale_fill_gradient(low = "lightyellow", high = "darkblue", na.value = "white") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.4, na.value = "white")+
+
+  theme_minimal() +
+  labs(
+    title = paste("Mapa para variable de gasto público o de gobierno, año", input$año),
+    fill = "Valor G"
+  ) + 
+    theme(
+      plot.title = element_text(size = 24, face = "bold"),     # Título del gráfico
+      legend.title = element_text(size = 18),                  # Título de la leyenda
+      legend.text = element_text(size = 14),                   # Texto de la leyenda
+      axis.title = element_text(size = 13),                    # Títulos de ejes
+      axis.text = element_text(size = 12)                      # Números del eje
+    )
+})
+```
+
+
+### Exportaciones
+
+```{r}
+renderPlot({
+  df_filtrado <- df_min_max %>%
+    filter(Año == input$año)
+
+  world_joined <- world %>%
+    left_join(df_filtrado, by = "name")
+
+  ggplot(data = world_joined) +
+  geom_sf(aes(fill = X), color = "gray90") +
+  #scale_fill_viridis_c(option = "viridis", na.value = "white") +
+  #scale_fill_gradient(low = "#B9DDF1", high = "#2A5783", na.value = "white") +#azul pastel
+  #scale_fill_gradient(low = "#FEB1A3", high = "#AE123A", na.value = "white") +#rojo pastel
+  #scale_fill_gradient(low = "#FBBC70", high = "#9E3D22", na.value = "white") +#naranja pastel
+  #scale_fill_gradient(low = "#AACAF5", high = "#001889", na.value = "white") +#azul
+  #scale_fill_gradient(low = "#001889", high = "#AACAF5", na.value = "white") +#azul-inv
+  #scale_fill_gradient(low = "lightyellow", high = "darkblue", na.value = "white") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.4, na.value = "white")+
+
+  theme_minimal() +
+  labs(
+    title = paste("Mapa para variable de exportaciones, año", input$año),
+    fill = "Valor X"
+  ) + 
+    theme(
+      plot.title = element_text(size = 24, face = "bold"),     # Título del gráfico
+      legend.title = element_text(size = 18),                  # Título de la leyenda
+      legend.text = element_text(size = 14),                   # Texto de la leyenda
+      axis.title = element_text(size = 13),                    # Títulos de ejes
+      axis.text = element_text(size = 12)                      # Números del eje
+    )
+})
+```
+
+
+### Importaciones
+
+```{r}
+renderPlot({
+  df_filtrado <- df_min_max %>%
+    filter(Año == input$año)
+
+  world_joined <- world %>%
+    left_join(df_filtrado, by = "name")
+
+  ggplot(data = world_joined) +
+  geom_sf(aes(fill = M), color = "gray90") +
+  #scale_fill_viridis_c(option = "viridis", na.value = "white") +
+  #scale_fill_gradient(low = "#B9DDF1", high = "#2A5783", na.value = "white") +#azul pastel
+  #scale_fill_gradient(low = "#FEB1A3", high = "#AE123A", na.value = "white") +#rojo pastel
+  #scale_fill_gradient(low = "#FBBC70", high = "#9E3D22", na.value = "white") +#naranja pastel
+  #scale_fill_gradient(low = "#AACAF5", high = "#001889", na.value = "white") +#azul
+  #scale_fill_gradient(low = "#001889", high = "#AACAF5", na.value = "white") +#azul-inv
+  #scale_fill_gradient(low = "lightyellow", high = "darkblue", na.value = "white") +
+  scale_fill_gradient2(low = "#FDE333", mid = "#00A790", high = "#4B0055", midpoint = 0.4, na.value = "white")+
+
+  theme_minimal() +
+  labs(
+    title = paste("Mapa para variable de importaciones, año", input$año),
+    fill = "Valor M"
+  ) + 
+    theme(
+      plot.title = element_text(size = 24, face = "bold"),     # Título del gráfico
+      legend.title = element_text(size = 18),                  # Título de la leyenda
+      legend.text = element_text(size = 14),                   # Texto de la leyenda
+      axis.title = element_text(size = 13),                    # Títulos de ejes
+      axis.text = element_text(size = 12)                      # Números del eje
+    )
+})
+```
+
+
+### Variables por pais
+
+```{r}
+# Menú de selección
+# selectInput("pais", "Selecciona un país:",
+#             choices = sort(unique(df$name)),
+#             selected = "México")  # o cualquier país por defecto
+```
+
+```{r, }
+library(shiny)
+library(tidyr)
+library(dplyr)
+
+selectInput("pais", "Selecciona un país:", choices = sort(unique(df_min_max$name)), selected = "México")
+
+renderPlot({
+  # Aquí va el código adaptado de arriba
+
+
+# 1. Filtrar y preparar datos del país seleccionado
+df_pais <- df_min_max %>%
+  filter(name == input$pais) %>%
+  mutate(Año = as.numeric(as.character(Año)))
+
+# 2. Transformar a formato largo
+variables_economicas <- c("G", "C", "I", "M", "X", "PIB")
+df_lineas <- df_pais %>%
+  pivot_longer(cols = all_of(variables_economicas),
+               names_to = "Variable",
+               values_to = "Valor") %>%
+  mutate(Variable = factor(Variable, levels = variables_economicas))
+
+# 3. Visualización
+ggplot(df_lineas, aes(x = Año, y = Valor, color = Variable)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = paste("Evolución de Variables Económicas Estandarizadas en", input$pais),
+    x = "Año",
+    y = "Valor Estandarizado (Min-Max)",
+    color = "Variable"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, size = 24, face = "bold"),
+    axis.text.x = element_text(hjust = 1, size = 11),
+    axis.title =element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.title = element_text(size = 16)
+  ) +
+  scale_x_continuous(breaks = unique(df_lineas$Año)) +
+  scale_color_manual(
+    values = c(
+      "G" = "#4B0055",
+      "C" = "#006992",
+      "I" = "#21BFAE",
+      "M" = "#5CCE64",
+      "X" = "#C0DE35",
+      "PIB" = "#FDE333"
+    ),
+    labels = c(
+      "G" = "Gasto público",
+      "C" = "Consumo",
+      "I" = "Inversión",
+      "M" = "Importaciones",
+      "X" = "Exportaciones",
+      "PIB" = "Producto Interno Bruto"
+    )
+  )
+
+}, height = 500, width = 1000)
+```
+
+
+
+Column {data-width=200}
+-----------------------------------------------------------------------
+
+### Año seleccionado
+
+```{r}
+sliderInput("año", "Selecciona el año:", min = 2000, max = 2023, value = 2000, step = 1)
+```
+
+### Variables
+
+- C: Consumo agregado de bienes y servicios
+- PIB: Producto interno bruto
+- G: Gasto público
+- I: Inversión
+- X: Exportaciones
+- M: Importaciones
+
+```{r}
+
+```
+
